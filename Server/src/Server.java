@@ -9,19 +9,19 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class Server {
-    private ServerSocket serverSocket;
-    private final Map<String, ClientHandler> clients;
+    private final ServerSocket SERVER_SOCKET;
+    private final Map<String, ClientHandler> CLIENTS;
 
     public Server(int port) throws IOException {
-        serverSocket = new ServerSocket(port);
-        clients = new HashMap<>();
+        SERVER_SOCKET = new ServerSocket(port);
+        CLIENTS = new HashMap<>();
         System.out.println("Ready on port: " + port);
     }
 
     public void listenForConnection() {
         try {
             while (true) {
-                Socket clientSocket = serverSocket.accept();
+                Socket clientSocket = SERVER_SOCKET.accept();
                 ClientHandler clientHandler = new ClientHandler(clientSocket, this);
                 System.out.println("New client connected: " + clientSocket.getRemoteSocketAddress());
                 Thread clientThread = new Thread(clientHandler);
@@ -33,15 +33,23 @@ public class Server {
     }
 
     public synchronized void broadcast(String message, String senderUsername) {
-        clients.values().forEach(client -> {
+        CLIENTS.values().forEach(client -> {
             if (!client.getUsername().equals(senderUsername)) {
                 client.sendMessage(message);
             }
         });
     }
 
+    public synchronized boolean sendPrivateMessage(String receiver, String message) {
+        if (CLIENTS.get(receiver) == null){
+            return false;
+        }
+        CLIENTS.get(receiver).sendMessage("PRIVATE_MSG " + message);
+        return true;
+    }
+
     public synchronized void ping(String senderUsername) {
-        clients.values().forEach(client -> {
+        CLIENTS.values().forEach(client -> {
             if (client.getUsername().equals(senderUsername)) {
                 client.sendMessage("PING");
             }
@@ -55,22 +63,19 @@ public class Server {
                 Map<String, ArrayList<String>> jsonMap = new HashMap<>();
 
                 jsonMap.put("clients", new ArrayList<>());
-                clients.values().forEach(client -> {
+                CLIENTS.values().forEach(client -> {
                     if (!client.getUsername().equals(receiverUsername)) {
                         jsonMap.get("clients").add(client.getUsername());
                     }
                 });
                 listOfClients = new ObjectMapper().writeValueAsString(jsonMap);
-
             } else {
                 Map<String, Object> jsonMap = new HashMap<>();
 
                 jsonMap.put("status", "ERROR");
                 jsonMap.put("code", "9000");
                 listOfClients = new ObjectMapper().writeValueAsString(jsonMap);
-
             }
-
         } catch (JsonProcessingException ex) {
             System.out.println(ex.getMessage());
         }
@@ -79,10 +84,10 @@ public class Server {
     }
 
     public synchronized boolean addClient(String username, ClientHandler clientHandler) {
-        if (clients.containsKey(username)) {
+        if (CLIENTS.containsKey(username)) {
             return false;
         }
-        clients.put(username, clientHandler);
+        CLIENTS.put(username, clientHandler);
         return true;
     }
 
@@ -91,15 +96,15 @@ public class Server {
             Map<String, Object> jsonMap = new HashMap<>();
             jsonMap.put("username", username);
             String sentMessage = MessageHandler.toJson(jsonMap);
-            clients.values().forEach(client -> {
-                client.sendMessage("LEFT " + sentMessage);
+            CLIENTS.values().forEach(client -> {
+                if (!client.getUsername().equals(username) && CLIENTS.get(username) != null){
+                    client.sendMessage("LEFT " + sentMessage);
+                }
             });
         } catch (Exception ex) {
             System.out.println(ex.getMessage());
         }
-        clients.remove(username);
-
-//        System.out.println("Client " + username + " disconnected.");
+        CLIENTS.remove(username);
     }
 
     public static void main(String[] args) {

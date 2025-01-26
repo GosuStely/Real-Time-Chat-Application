@@ -14,7 +14,7 @@ public class Client {
     private BufferedReader receiver;
     private Scanner input;
     private volatile boolean isRunning = true;
-    private boolean isLogged = true;
+    private boolean isLogged = false;
 
     public void startConnection(String ip, int port) {
         try {
@@ -26,7 +26,7 @@ public class Client {
             serverMessageSender.start();
             showMenuOptions();
             while (isRunning) {
-                if (isLogged) {
+                if (!isLogged) {
                     System.out.println("Enter username:");
                 }
                 receiveMessageFromServer();
@@ -46,15 +46,34 @@ public class Client {
                 String jsonMessage;
                 String header;
                 HashMap<String, Object> messageMap = new HashMap<>();
-                if (userInput.equals("-8-")) {
-                    sendMessageToServer("BYE");
-                    return;
-                }
-                if (isLogged) {
-                    isLogged = false;
+                if (!isLogged) {
+                    isLogged = true;
                     messageMap.put("username", userInput);
                     header = "ENTER ";
-                } else {
+                } else if (userInput.equals("/quit")) {
+                    sendMessageToServer("BYE");
+                    return;
+                } else if (userInput.equals("/userList")) {
+                    sendMessageToServer("LIST_REQ");
+                    continue;
+                } else if (userInput.split(" ")[0].equals("/dm")) {
+                    if(userInput.split(" ").length < 2){
+                        System.err.println("you need to write a receiver's username");
+                        continue;
+                    }
+                    if (userInput.split(" ").length < 3){
+                        System.err.println("you need to write message to the receiver");
+                        continue;
+                    }
+                    String receiver = userInput.split(" ")[1];
+                    String message = userInput.split(" ", 3)[2];
+                    messageMap.put("receiver", receiver);
+                    messageMap.put("message", message);
+                    header = "PRIVATE_MSG_REQ ";
+                    jsonMessage = MessageHandler.toJson(messageMap);
+                    sendMessageToServer(header + jsonMessage);
+                    continue;
+                }else{
                     messageMap.put("message", userInput);
                     header = "BROADCAST_REQ ";
                 }
@@ -73,7 +92,9 @@ public class Client {
             isRunning = false;
             closeConnection();
         } else if (serverMessage.equals("PING")) {
-//            sendMessageToServer("PONG");
+            sendMessageToServer("PONG");
+            return;
+        } else if (serverMessage.equals("UNKNOWN_COMMAND")){
             return;
         }
         String[] splitMessage = serverMessage.split(" ", 2);
@@ -83,10 +104,10 @@ public class Client {
             case "ENTER_RESP" -> {
                 if (serverMessage.contains("5000")) {
                     System.out.println("User with this name already exists");
-                    isLogged = true;
+                    isLogged = false;
                 } else if (serverMessage.contains("5001")) {
                     System.out.println("Username has an invalid format or length");
-                    isLogged = true;
+                    isLogged = false;
                 }
             }
             case "BROADCAST" -> {
@@ -103,11 +124,33 @@ public class Client {
                 Joined joined = objectMapper.readValue(content, Joined.class);
                 System.out.println("User " + joined.getUsername() + " joined the chat.");
             }
+            case "LEFT" -> {
+                ObjectMapper objectMapper = new ObjectMapper();
+                Left left = objectMapper.readValue(content, Left.class);
+                System.out.println("User " + left.username() + " left the chat.");
+            }
+            case "LIST_RESP" -> {
+                ObjectMapper objectMapper = new ObjectMapper();
+                ListResp listResp = objectMapper.readValue(content, ListResp.class);
+                System.out.print("Active users: ");
+                for (String clientName : listResp.clients()) {
+                    System.out.print(clientName + " ");
+                }
+                System.out.println();
+            }
+            case "PRIVATE_MSG" -> {
+                ObjectMapper objectMapper = new ObjectMapper();
+                PrivateMessage privateMessage = objectMapper.readValue(content, PrivateMessage.class);
+                System.out.printf("%s whispered: %s%n",privateMessage.sender(),privateMessage.message());
+            }
         }
     }
 
     private void showMenuOptions() {
-        System.out.println("Type -8- to exit the program");
+        System.out.println("Type /quit to exit the program");
+        System.out.println("Type /userList to get list of clients");
+        System.out.println("Type /dm <user> <text> ");
+        System.out.println("Type /4 ");
     }
 
     private void closeConnection() {
@@ -120,12 +163,14 @@ public class Client {
             System.out.println(e.getMessage());
         }
     }
-    private void sendMessageToServer(String text){
+
+    private void sendMessageToServer(String text) {
         sender.println(text);
         sender.flush();
     }
+
     public static void main(String[] args) {
         Client client = new Client();
-        client.startConnection("localhost",1234);
+        client.startConnection("localhost", 1234);
     }
 }
