@@ -214,13 +214,12 @@ C1 -> S: GAME_START_REQ {"receiver": "<C2_username>"}
 
 ### 9.1.1. Happy flow
 ```
-S -> C1: GAME_START_RESP {"status": "OK"}
 S -> C2: GAME_INVITE {"sender": "<C1_username>"}
 ```
 
 ### 9.1.2. Unhappy flow
 ```
-S -> C1: GAME_START_RESP {"status": "ERROR", "code": <error code>}
+S -> C1: GAME_PREPARE_RESP {"status": "ERROR", "code": <error code>}
 ```
 Possible `<error code>`:
 
@@ -231,7 +230,7 @@ Possible `<error code>`:
 
 In case there's an ongoing game between other players (referred as `C3` and `C4`):
 ```
-S -> C1: GAME_START_RESP {"status": "ERROR", "code": <error code>, "player1": "<C3_username>", "player2": "<C4_username>"}
+S -> C1: GAME_PREPARE_RESP {"status": "ERROR", "code": <error code>}
 ```
 Possible `<error code>`:
 
@@ -251,12 +250,109 @@ If Client 2 rejects the invitation:
 ```
 C2 -> S: GAME_INVITE_RESP {"status": "REJECT", "sender": "<C1_username>"}
 ```
-### 9.2.2. Happy flow
-If Client 2 does not accept in 10 seconds.
 ```
-S -> C GAME_START_RESP {"status": "ERROR", "code": <error code>, "player1": "<C1_username>", "player2": "<C2_username>"}
+S -> C1: GAME_PREPARE_RESP {"status": "ERROR", "code": <error code>}
 ```
+Possible `<error code>`:
 
-| Error code | Description                                              |
-|------------|----------------------------------------------------------|
-| 11004      | Player `<C2_username>` didn't accept the invite in time. | 
+| Error code | Description                             |
+|------------|-----------------------------------------|
+| 11004      | Game invite was rejected                |
+
+### 9.2.2 Unhappy flow
+none.
+## 9.3 Game Starts
+When the second users accept the game all users receive:
+### 9.3.1 Happy flow
+```
+S -> C: GAME_START_RESP {"playerOne": "<C1_username>","playerTwo": "<C2_username>"}
+```
+### 9.3.2 Unhappy flow
+none.
+## 9.4 Picking an action
+When the user wants to pick an action(Rock,Paper,Scissors):
+### 9.4.1 Happy flow
+```
+C1 -> S: ACTION_REQUEST {"action": "<action>"}
+```
+### 9.4.2 Unhappy flow
+if the user makes a forbidden action he is going to receive:
+```
+S -> C1: GAME_PREPARE_RESP {"status": "ERROR", "code": <error code>}
+```
+Possible `<error code>`:
+
+| Error code | Description                                 |
+|------------|---------------------------------------------|
+| 12001      | Making action without being in a game.      |
+| 12002      | Making second action in one game.           |
+| 12003      | Action different from Rock, Paper, Scissors |
+
+
+## 9.5 Winner
+When both players have made an action:
+### 9.5.1 Happy flow
+If player One wins Server will send to all users:
+```
+S -> C: GAME_WINNER {"winner": "<player one username>"}
+```
+### 9.5.2 unHappy flow
+none.
+
+# 10. File Transmit
+
+This section explains the process of confirming or rejecting a file transfer
+request and the steps involved in transmitting a file between two parties (uploader and downloader).
+## 10.1 File Transfer Request
+The uploader initiates a file transfer request to the server.
+### 10.1.1 Uploader Request
+```
+Uploader -> S: FILE_UPLOAD_REQ {"to": "<downloader>", "hash": "<original_file>", "fileExtension": <"file_extension">}
+S -> Uploader: FILE_UPLOAD_RESP {"status": "OK"}
+```
+Server notifies downloader of the file transfer request.
+### 10.1.2 Server Notification to Downloader
+```
+S -> Downloader: FILE_DOWNLOAD_REQ {"from": "<uploader>", "hash": "<original_file>", "fileExtension": "<file_extension>"}
+```
+### 10.1.3 Downloader Response
+The downloader confirms or rejects the file transfer request.
+``` 
+Downloader -> S: FILE_DOWNLOAD_RESP {"from": "<downloader>", "status": "OK/ERROR"}
+```
+### 10.1.4 Server Updates Both Parties
+The server notifies both the uploader and downloader about the status of the request.
+``` 
+S -> Uploader: FILE_DOWNLOAD_STATUS_RESP {"status": "OK/ERROR"}
+S -> Downloader: FILE_DOWNLOAD_STATUS_RESP {"status": "OK/ERROR"}
+```
+## 10.2 Generating a UUID for the File Transfer
+The server assigns a unique identifier (UUID) to identify 
+the uploader and downloader during the file transmission process.
+### 10.2.1 UUID Distribution
+The server sends the UUIDs to both parties, with suffixes indicating their roles:
+`s: Uploader (sender)`
+`r: Downloader (receiver)`
+
+``` 
+S -> Uploader: FILE_SEND_UUID {"uuid": "<uuid>s"}
+S -> Downloader: FILE_SEND_UUID {"uuid": "<uuid>r"}
+```
+## 10.3 Establishing a Transfer Socket
+Both clients establish separate connections on port 1338 for file transmission.
+The server uses the UUID suffix to determine the client’s role.
+### 10.3.1 Uploader Starts Transmission
+The uploader begins sending the file data if the UUID ends with "s".
+``` 
+Uploader -> S: (transfer socket) <uuid>s<FILE_DATA>
+```
+### 10.3.2 Downloader Receives Data
+The downloader listens for and receives the transmitted file data if the UUID ends with "r".
+``` 
+Downloader -> S: (transfer socket) <uuid>r
+S -> Downloader: (transfer socket) <RECEIVE_DATA>
+```
+## 10.4 Definitions
+`FILE_DATA: A small chunk of file data being sent by the uploader.`
+`RECEIVE_DATA: A small chunk of file data being received by the downloader.`
+

@@ -18,11 +18,12 @@ class ClientHandler implements Runnable {
     private volatile boolean didPong;
     private volatile boolean isRunning;
 
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private final ScheduledExecutorService scheduler;
 
     public ClientHandler(Socket socket, Server server) {
         this.socket = socket;
         this.server = server;
+        this.scheduler = Executors.newScheduledThreadPool(1);
     }
 
     @Override
@@ -60,6 +61,15 @@ class ClientHandler implements Runnable {
                     case "PRIVATE_MSG_REQ":
                         handlePrivateMessageRequest(content);
                         break;
+                    case "GAME_START_REQ":
+                        handleGameRequest(content);
+                        break;
+                    case "GAME_INVITE_RESP":
+                        handleGameInviteResponse(content);
+                        break;
+                    case "ACTION_REQUEST":
+                        handleActionRequest(content);
+                        break;
                     default:
                         sendMessage("UNKNOWN_COMMAND");
                         break;
@@ -69,6 +79,64 @@ class ClientHandler implements Runnable {
             System.out.println("Error handling client: " + e.getMessage());
         } finally {
             cleanup();
+        }
+    }
+
+    private void handleActionRequest(String content) {
+        Map<String, Object> message;
+        try {
+            message = MessageHandler.fromJson(content);
+            String action = (String) message.get("action");
+            server.handleAction(action,this.username);
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
+        }
+    }
+
+    private void handleGameInviteResponse(String content) {
+        Map<String, Object> message;
+        try {
+            message = MessageHandler.fromJson(content);
+            String sender = (String) message.get("sender");
+            String status = (String) message.get("status");
+            server.handleGame(sender,status,this.username);
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
+        }
+
+    }
+
+    private void handleGameRequest(String content) {
+        Map<String, Object> message;
+        try {
+            message = MessageHandler.fromJson(content);
+            String receiver = (String) message.get("receiver");
+            String sentMessage;
+            Map<String,Object> jsonMap = new HashMap<>();
+            if (receiver.equals(this.username)){
+                jsonMap.put("status", "ERROR");
+                jsonMap.put("code", "11002");
+                sentMessage = MessageHandler.toJson(jsonMap);
+                sendMessage("GAME_PREPARE_RESP " + sentMessage);
+                return;
+            }
+            jsonMap.put("sender", this.username);
+            sentMessage = MessageHandler.toJson(jsonMap);
+            boolean flag =server.sendGameInvite(receiver,sentMessage);
+            jsonMap.clear();
+            if (!flag){
+                jsonMap.put("status", "ERROR");
+                jsonMap.put("code", "11001");
+                sentMessage = MessageHandler.toJson(jsonMap);
+                sendMessage("GAME_PREPARE_RESP " + sentMessage);
+            } else {
+                jsonMap.put("status", "OK");
+                sentMessage = MessageHandler.toJson(jsonMap);
+                sendMessage("GAME_PREPARE_RESP " + sentMessage);
+            }
+
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
         }
     }
 
@@ -182,7 +250,7 @@ class ClientHandler implements Runnable {
             Map<String, Object> message = MessageHandler.fromJson(content);
             String requestedUsername = (String) message.get("username");
 
-            if (requestedUsername.isBlank() || requestedUsername.length() > 20 || requestedUsername.length() < 3) {
+            if (requestedUsername.isBlank() || requestedUsername.length() > 14 || requestedUsername.length() < 3) {
                 Map<String, Object> jsonMap = new HashMap<>();
                 jsonMap.put("status", "ERROR");
                 jsonMap.put("code", "5001");
